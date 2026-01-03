@@ -1,2 +1,5 @@
 mcp
-openai
+google-generativeai
+prompt_toolkit
+rich
+mcp
