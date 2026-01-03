@@ -14,6 +14,7 @@ from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
 
 # AI & MCP Libraries
 from google import genai
@@ -54,6 +55,27 @@ def mcp_tool_to_gemini(tool):
         description=tool.description,
         parameters=tool.inputSchema
     )
+def print_help():
+    """Displays a help menu using Rich tables."""
+    table = Table(title="Git Agent Help & Capabilities")
+
+    table.add_column("Command / Query", style="cyan", no_wrap=True)
+    table.add_column("Description", style="white")
+
+    # System Commands
+    table.add_row("exit / quit", "Close the agent.")
+    table.add_row("help", "Show this menu.")
+    
+    # AI Capabilities
+    table.add_section()
+    table.add_row("Search", "e.g., 'Where is the login logic?'\n(Uses `git grep` to find code)")
+    table.add_row("Status", "e.g., 'What did I change?'\n(Checks uncommitted/staged files)")
+    table.add_row("History", "e.g., 'Who broke the build yesterday?'\n(Reads `git log`)")
+    table.add_row("Read", "e.g., 'Explain cli.py'\n(Reads file content with pagination)")
+    table.add_row("Diff", "e.g., 'Review my changes'\n(Analyzes diffs smarty)")
+
+    console.print(table)
+    console.print("[dim]Tip: Use Up/Down arrows to navigate command history.[/dim]\n")
 
 async def run_chat_loop():
     if not GEMINI_API_KEY:
@@ -108,12 +130,17 @@ async def run_chat_loop():
             while True:
                 try:
                     user_input = await session.prompt_async(get_prompt())
-                    
-                    if user_input.strip().lower() in ["exit", "quit"]:
-                        break
-                    if not user_input.strip():
-                        continue
+                    cleaned_input = user_input.strip().lower()
 
+                    if cleaned_input in ["exit", "quit"]:
+                        break
+                    
+                    if cleaned_input == "help":
+                        print_help()
+                        continue
+                        
+                    if not cleaned_input:
+                        continue
                     # --- Interaction Loop ---
                     with console.status("[bold cyan]Gemini is thinking...", spinner="dots"):
                         # Send initial message
@@ -173,5 +200,9 @@ async def run_chat_loop():
 if __name__ == "__main__":
     try:
         asyncio.run(run_chat_loop())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    except BaseException:
+        pass
+    finally:
         console.print("\n[yellow]Goodbye![/yellow]")
