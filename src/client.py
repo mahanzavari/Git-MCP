@@ -6,11 +6,10 @@ from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-API_BASE = "https://api.gpt4-all.xyz/v1"
+API_BASE = os.getenv("BASE_URL", "https://api.openai.com/v1")
 API_KEY = os.getenv("OPENAI_API_KEY", "g4a-iya0hKq8xWuFHj6z_gzCSK7no30MKGPns_g9KhpDk9I")
 MODEL_NAME = "gemini-3-flash-preview" 
 TARGET_REPO = "/home/mahan/Projects/git-mcp"
-# ------------------------------------------------------------------
 
 # Initialize OpenAI Client with your Custom URL
 client = AsyncOpenAI(
