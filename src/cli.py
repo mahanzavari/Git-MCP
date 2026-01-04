@@ -22,8 +22,13 @@ from mcp.client.stdio import stdio_client
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
 MODEL_NAME = "gemini-2.5-flash" 
-TARGET_REPO = os.getenv("GIT_REPO_PATH", os.getcwd()) 
 HISTORY_FILE = ".git_agent_history"
+
+# --- DYNAMIC REPO RESOLUTION ---
+# We use the directory where the user ran the command.
+# The GitEngine in the server will handle the "walk up" logic to find the .git folder
+# or initialize one if missing.
+TARGET_REPO = os.getcwd() 
 
 console = Console()
 
@@ -36,7 +41,8 @@ prompt_style = Style.from_dict({
 })
 
 def get_prompt():
-    repo_name = os.path.basename(os.path.abspath(TARGET_REPO))
+    # Show the current folder name in the prompt
+    repo_name = os.path.basename(TARGET_REPO)
     return HTML(
         f'<username>dev</username><at>@</at><host>gemini-cli</host>:'
         f'<path>~/{repo_name}</path><pound>$</pound> '
@@ -71,6 +77,8 @@ async def run_chat_loop():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
+    # We pass the CURRENT directory to the server.
+    # The Server's GitEngine will figure out where the root is.
     server_params = StdioServerParameters(
         command="python",
         args=["src/server.py"], 
@@ -78,8 +86,8 @@ async def run_chat_loop():
     )
 
     console.print(Panel.fit(
-        f"[bold green]Git Agent (Architect Mode)[/bold green]\n"
-        f"[dim]Repo: {TARGET_REPO}[/dim]\n"
+        f"[bold green]Git Agent (Auto-Detect Mode)[/bold green]\n"
+        f"[dim]Working Dir: {TARGET_REPO}[/dim]\n"
         f"[dim]Model: {MODEL_NAME}[/dim]",
         border_style="green"
     ))
@@ -92,18 +100,16 @@ async def run_chat_loop():
             gemini_funcs = [mcp_tool_to_gemini(t) for t in mcp_tools.tools]
             gemini_tool = types.Tool(function_declarations=gemini_funcs)
             
-            # --- STRATEGIC SYSTEM INSTRUCTION ---
             system_instr = (
                 "You are a Senior Software Engineer Agent.\n"
-                "You work efficiently using a 'Map -> Index -> Read' strategy.\n\n"
+                "You are operating in the directory specified by `get_repo_status`.\n"
                 "WORKFLOW:\n"
-                "1. **Explore first:** Use `get_project_structure` to see where things are.\n"
-                "2. **Scan interfaces:** Use `inspect_file_interface` to understand classes/methods without reading full code. This saves tokens.\n"
-                "3. **Deep dive:** Use `read_file` ONLY on specific line numbers you need to modify or verify.\n"
-                "4. **Formatting:** NEVER output raw JSON. Always render lists/tables in Markdown.\n"
-                "5. **Coding:** When creating code, keep it modular."
+                "1. **Explore first:** Use `get_project_structure`.\n"
+                "2. **Scan interfaces:** Use `inspect_file_interface` to understand capabilities.\n"
+                "3. **Deep dive:** Use `read_file` ONLY on specific line numbers.\n"
+                "4. **Formatting:** NEVER output raw JSON. Render lists/tables in Markdown.\n"
+                "5. **Coding:** Keep code modular."
             )
-            # ------------------------------------
 
             config = types.GenerateContentConfig(
                 tools=[gemini_tool],
