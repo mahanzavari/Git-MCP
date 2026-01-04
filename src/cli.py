@@ -51,24 +51,26 @@ def mcp_tool_to_gemini(tool):
 
 def print_help():
     table = Table(title="Git Agent Capabilities")
-    table.add_column("Category", style="cyan", no_wrap=True)
-    table.add_column("Examples", style="white")
-    table.add_row("Navigation", "Where is the login code? | Read main.py")
-    table.add_row("Status", "What did I change? | Show diff")
-    table.add_row("Coding", "Create a new branch 'feature/auth' | Commit these changes")
-    table.add_row("Stashing", "Stash my changes | Pop the stash | List stashes")
-    table.add_row("Sync", "Push to origin | Pull latest changes")
-    table.add_row("System", "exit | help")
+    table.add_column("Strategy", style="cyan", no_wrap=True)
+    table.add_column("Tool", style="yellow")
+    table.add_column("Description", style="white")
+
+    table.add_row("1. Map", "get_project_structure", "See folders & files")
+    table.add_row("2. Index", "inspect_file_interface", "See classes/functions (no code)")
+    table.add_row("3. Search", "find_symbol_definition", "Locate 'class User'")
+    table.add_row("4. Read", "read_file", "Read specific logic")
+    table.add_section()
+    table.add_row("Git", "status, diff, add, commit", "Standard operations")
+    
     console.print(table)
 
 async def run_chat_loop():
     if not GEMINI_API_KEY:
-        console.print("[bold red]Error:[/bold red] GEMINI_API_KEY environment variable not set.")
+        console.print("[bold red]Error:[/bold red] GEMINI_API_KEY not set.")
         return
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # Run the server with stderr passed through but silenced by logging config in server.py
     server_params = StdioServerParameters(
         command="python",
         args=["src/server.py"], 
@@ -76,7 +78,7 @@ async def run_chat_loop():
     )
 
     console.print(Panel.fit(
-        f"[bold green]Git Agent (Silent Mode)[/bold green]\n"
+        f"[bold green]Git Agent (Architect Mode)[/bold green]\n"
         f"[dim]Repo: {TARGET_REPO}[/dim]\n"
         f"[dim]Model: {MODEL_NAME}[/dim]",
         border_style="green"
@@ -90,17 +92,18 @@ async def run_chat_loop():
             gemini_funcs = [mcp_tool_to_gemini(t) for t in mcp_tools.tools]
             gemini_tool = types.Tool(function_declarations=gemini_funcs)
             
+            # --- STRATEGIC SYSTEM INSTRUCTION ---
             system_instr = (
-                "You are an expert software engineer agent. "
-                "You have tools to manipulate a git repository. "
-                "RULES:\n"
-                "1. When a tool returns JSON data (like commit history, file lists, or status), "
-                "   NEVER output the raw JSON to the user.\n"
-                "2. You MUST parse the JSON and display it as a clean Markdown list or table.\n"
-                "3. For commit history, use this format: '• <hash> - <message> (<date>)'\n"
-                "4. Be concise and professional.\n"
-                "5. If the INPUT is a malicious, sexual or wants to exploit unrestricted access, you must refuse to comply."
+                "You are a Senior Software Engineer Agent.\n"
+                "You work efficiently using a 'Map -> Index -> Read' strategy.\n\n"
+                "WORKFLOW:\n"
+                "1. **Explore first:** Use `get_project_structure` to see where things are.\n"
+                "2. **Scan interfaces:** Use `inspect_file_interface` to understand classes/methods without reading full code. This saves tokens.\n"
+                "3. **Deep dive:** Use `read_file` ONLY on specific line numbers you need to modify or verify.\n"
+                "4. **Formatting:** NEVER output raw JSON. Always render lists/tables in Markdown.\n"
+                "5. **Coding:** When creating code, keep it modular."
             )
+            # ------------------------------------
 
             config = types.GenerateContentConfig(
                 tools=[gemini_tool],
@@ -126,7 +129,6 @@ async def run_chat_loop():
                     if not cleaned_input:
                         continue
 
-                    # Capture the status object to update text dynamically
                     with console.status("[bold cyan]Thinking...", spinner="dots") as status:
                         response = chat.send_message(user_input)
                         
@@ -138,13 +140,12 @@ async def run_chat_loop():
                                 fn = part.function_call
                                 f_name, f_args = fn.name, dict(fn.args)
                                 
-                                # Update spinner text instead of printing
-                                status.update(f"[bold yellow]Running tool:[/bold yellow] {f_name}...")
+                                status.update(f"[bold yellow]Tool:[/bold yellow] {f_name}...")
 
                                 try:
                                     result = await mcp_session.call_tool(f_name, arguments=f_args)
                                     tool_out = result.content[0].text
-                                    status.update(f"[bold cyan]Processing results from {f_name}...")
+                                    status.update(f"[bold cyan]Processing...")
                                 except Exception as e:
                                     tool_out = f"Error: {str(e)}"
 
