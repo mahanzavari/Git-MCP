@@ -2,6 +2,9 @@ from mcp.server.fastmcp import FastMCP
 from git_engine import GitEngine
 import os
 import sys
+import logging
+
+logging.basicConfig(level=logging.ERROR)
 
 mcp = FastMCP("git-mcp")
 
