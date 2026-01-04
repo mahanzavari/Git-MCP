@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# UI Libraries
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
@@ -16,7 +15,6 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
-# AI & MCP Libraries
 from google import genai
 from google.genai import types
 from mcp import ClientSession, StdioServerParameters
@@ -24,7 +22,8 @@ from mcp.client.stdio import stdio_client
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
 MODEL_NAME = "gemini-2.5-flash" 
-TARGET_REPO = os.getenv("GIT_REPO_PATH", "/home/mahan/Projects/git-mcp") 
+# Default to current directory if not set
+TARGET_REPO = os.getenv("GIT_REPO_PATH", os.getcwd()) 
 HISTORY_FILE = ".git_agent_history"
 
 console = Console()
@@ -40,47 +39,39 @@ prompt_style = Style.from_dict({
 
 def get_prompt():
     """Builds a PS1-style prompt: user@git-agent:~/repo$"""
-    repo_name = os.path.basename(TARGET_REPO)
+    repo_name = os.path.basename(os.path.abspath(TARGET_REPO))
     return HTML(
-        f'<username>user</username><at>@</at><host>gemini-cli</host>:'
+        f'<username>dev</username><at>@</at><host>gemini-cli</host>:'
         f'<path>~/{repo_name}</path><pound>$</pound> '
     )
 
 def mcp_tool_to_gemini(tool):
-    """
-    Converts MCP JSON Schema to Gemini FunctionDeclaration.
-    """
+    """Converts MCP JSON Schema to Gemini FunctionDeclaration."""
     return types.FunctionDeclaration(
         name=tool.name,
         description=tool.description,
         parameters=tool.inputSchema
     )
+
 def print_help():
     """Displays a help menu using Rich tables."""
-    table = Table(title="Git Agent Help & Capabilities")
+    table = Table(title="Git Agent Capabilities")
 
-    table.add_column("Command / Query", style="cyan", no_wrap=True)
-    table.add_column("Description", style="white")
+    table.add_column("Category", style="cyan", no_wrap=True)
+    table.add_column("Examples", style="white")
 
-    # System Commands
-    table.add_row("exit / quit", "Close the agent.")
-    table.add_row("help", "Show this menu.")
-    
-    # AI Capabilities
-    table.add_section()
-    table.add_row("Search", "e.g., 'Where is the login logic?'\n(Uses `git grep` to find code)")
-    table.add_row("Status", "e.g., 'What did I change?'\n(Checks uncommitted/staged files)")
-    table.add_row("History", "e.g., 'Who broke the build yesterday?'\n(Reads `git log`)")
-    table.add_row("Read", "e.g., 'Explain cli.py'\n(Reads file content with pagination)")
-    table.add_row("Diff", "e.g., 'Review my changes'\n(Analyzes diffs smarty)")
+    table.add_row("Navigation", "Where is the login code? | Read main.py")
+    table.add_row("Status", "What did I change? | Show diff")
+    table.add_row("Coding", "Create a new branch 'feature/auth' | Commit these changes")
+    table.add_row("Stashing", "Stash my changes | Pop the stash | List stashes") # Added this
+    table.add_row("Sync", "Push to origin | Pull latest changes")
+    table.add_row("System", "exit | help")
 
     console.print(table)
-    console.print("[dim]Tip: Use Up/Down arrows to navigate command history.[/dim]\n")
 
 async def run_chat_loop():
     if not GEMINI_API_KEY:
-        console.print("[bold red]Error:[/bold red] GOOGLE_API_KEY environment variable not set.")
-        console.print("Get one here: https://aistudio.google.com/app/apikey")
+        console.print("[bold red]Error:[/bold red] GEMINI_API_KEY environment variable not set.")
         return
 
     # 1. Configure Google GenAI Client
@@ -89,12 +80,12 @@ async def run_chat_loop():
     # 2. Setup MCP Server Parameters
     server_params = StdioServerParameters(
         command="python",
-        args=["src/server.py"], # Ensure this points to your server file
+        args=["src/server.py"], # Adjust if your server.py is elsewhere
         env={**os.environ, "GIT_REPO_PATH": TARGET_REPO}
     )
 
     console.print(Panel.fit(
-        f"[bold green]Git Agent (Gemini Edition)[/bold green]\n"
+        f"[bold green]Git Agent (Full Engineer Mode)[/bold green]\n"
         f"[dim]Repo: {TARGET_REPO}[/dim]\n"
         f"[dim]Model: {MODEL_NAME}[/dim]",
         border_style="green"
@@ -107,23 +98,28 @@ async def run_chat_loop():
             
             # Load Tools from Server
             mcp_tools = await mcp_session.list_tools()
-            
-            # Convert to Google Format
-            # Note: types.Tool takes a list of function_declarations
             gemini_funcs = [mcp_tool_to_gemini(t) for t in mcp_tools.tools]
             gemini_tool = types.Tool(function_declarations=gemini_funcs)
             
             # Initialize Chat Configuration
+            system_instr = (
+                "You are an expert software engineer agent with full access to a git repository via tools. "
+                "You can read code, search, edit files (you cannot edit file content directly, but you can manage git state), "
+                "stage changes, commit, branch, and push/pull. "
+                "1. Always check 'get_repo_status' first when asked about state. "
+                "2. Before committing, always run 'view_diff' to verify changes. "
+                "3. If asked to implement a feature, create a new branch first. "
+                "4. Be concise."
+            )
+
             config = types.GenerateContentConfig(
                 tools=[gemini_tool],
-                system_instruction="You are a senior developer assistant. You have access to a git repository. Always SEARCH for code before reading files. Be concise.",
+                system_instruction=system_instr,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             )
 
             # Start Chat Session
             chat = client.chats.create(model=MODEL_NAME, config=config)
-            
-            # Setup Shell Input
             session = PromptSession(history=FileHistory(HISTORY_FILE), style=prompt_style)
 
             # 4. Main Chat Loop
@@ -141,68 +137,51 @@ async def run_chat_loop():
                         
                     if not cleaned_input:
                         continue
-                    # --- Interaction Loop ---
-                    with console.status("[bold cyan]Gemini is thinking...", spinner="dots"):
-                        # Send initial message
+
+                    with console.status("[bold cyan]Agent working...", spinner="dots"):
                         response = chat.send_message(user_input)
                         
-                        # Handle Tool Execution Loop
                         while True:
-                            # Gemini response structure: candidates -> content -> parts
-                            if not response.candidates:
-                                break
-                                
+                            if not response.candidates: break
                             part = response.candidates[0].content.parts[0]
                             
-                            # Check for function call
                             if part.function_call:
-                                fn_call = part.function_call
-                                func_name = fn_call.name
-                                func_args = fn_call.args
+                                fn = part.function_call
+                                f_name, f_args = fn.name, dict(fn.args)
                                 
-                                console.print(f"  [dim]Executing:[/dim] [bold yellow]{func_name}[/bold yellow] [dim]{str(func_args)[:60]}...[/dim]")
+                                console.print(f"  [dim]>[/dim] [bold yellow]{f_name}[/bold yellow] [dim]{str(f_args)[:80]}[/dim]")
 
-                                # Execute Tool via MCP
                                 try:
-                                    # Convert args to dict if they aren't already
-                                    args_dict = dict(func_args) if func_args else {}
-                                    result = await mcp_session.call_tool(func_name, arguments=args_dict)
-                                    tool_output = result.content[0].text
+                                    result = await mcp_session.call_tool(f_name, arguments=f_args)
+                                    tool_out = result.content[0].text
+                                    
+                                    # Truncate visual output for user, but send full to LLM
+                                    display_out = tool_out[:200] + "..." if len(tool_out) > 200 else tool_out
+                                    console.print(f"  [dim]< {display_out.replace(os.linesep, ' ')}[/dim]")
+                                    
                                 except Exception as e:
-                                    tool_output = f"Error: {str(e)}"
-                                    console.print(f"  [bold red]Tool Error:[/bold red] {e}")
+                                    tool_out = f"Error: {str(e)}"
+                                    console.print(f"  [bold red]Error:[/bold red] {e}")
 
-                                # Send Result Back to Gemini
-                                # The new SDK uses 'types.Part.from_function_response'
                                 response_part = types.Part.from_function_response(
-                                    name=func_name,
-                                    response={"result": tool_output}
+                                    name=f_name, response={"result": tool_out}
                                 )
-                                
                                 response = chat.send_message([response_part])
                             else:
-                                # No function call -> Final text response
                                 break
                     
-                    # Print Final Answer
                     console.print()
                     if response.text:
                         console.print(Markdown(response.text))
-                    else:
-                        console.print("[dim]No text response.[/dim]")
                     console.print()
 
                 except Exception as e:
                     console.print(f"[bold red]System Error:[/bold red] {e}")
-                    # Uncomment for debugging:
-                    # import traceback; traceback.print_exc()
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_chat_loop())
     except (KeyboardInterrupt, SystemExit):
         pass
-    except BaseException:
-        pass
     finally:
-        console.print("\n[yellow]Goodbye![/yellow]")
+        console.print("\n[yellow]Shutting down.[/yellow]")
