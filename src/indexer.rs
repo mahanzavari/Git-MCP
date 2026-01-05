@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf}; // Path is used in chunker, but here we just need PathBuf usually. Kept for safety.
 use serde::{Deserialize, Serialize};
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 use rayon::prelude::*;
@@ -26,14 +26,15 @@ impl SemanticIndexer {
         fs::create_dir_all(&cache_dir).unwrap_or_default();
         let cache_path = cache_dir.join("embeddings.json");
 
-        println!("{}", "🔄 Initializing Embedding Model (may download ~300MB on first run)...".yellow());
-        let model = TextEmbedding::try_new(InitOptions {
-            model_name: EmbeddingModel::AllMiniLML6V2,
-            show_download_progress: true,
-            ..Default::default()
-        }).expect("Failed to load embedding model");
+        println!("{}", "🔄 Initializing Embedding Model...".yellow());
 
-        // Load existing index
+        // FIX 1: Use new() instead of struct expression for non-exhaustive struct
+        let options = InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+            .with_show_download_progress(true);
+
+        let model = TextEmbedding::try_new(options)
+            .expect("Failed to load embedding model.");
+
         let index = if cache_path.exists() {
             let data = fs::read_to_string(&cache_path).unwrap_or_default();
             serde_json::from_str(&data).unwrap_or_else(|_| Vec::new())
@@ -44,17 +45,15 @@ impl SemanticIndexer {
         Self { model, index, cache_path }
     }
 
-    /// Scans the repo and indexes new/modified files
     pub fn index_repo(&mut self, git_engine: &crate::git::GitEngine) {
-        let files_str = git_engine.get_file_tree(10); // Get flat list
-        // Parse the tree output to get real paths (simplified here, in prod use git ls-files direct)
         let output = git_engine.run(&["ls-files"]).unwrap_or_default();
-        let files: Vec<String> = output.lines().map(|s| s.to_string()).collect();
+        
+        // FIX 2: Add type hint |s: &str|
+        let files: Vec<String> = output.lines().map(|s: &str| s.to_string()).collect();
 
-        println!("{}", format!("🔍 Scanning {} files for semantic index...", files.len()).cyan());
+        if files.is_empty() { return; }
 
-        // Identify files that need indexing (naively re-index all for MVP to ensure freshness)
-        // In prod: Check file mtimes or hashes against a metadata store.
+        println!("{}", format!("Scanning {} files for semantic index...", files.len()).cyan());
         
         let chunks: Vec<CodeChunk> = files.par_iter()
             .flat_map(|path| {
@@ -66,16 +65,20 @@ impl SemanticIndexer {
 
         if chunks.is_empty() { return; }
 
-        println!("{}", format!("🧠 Embedding {} code chunks...", chunks.len()).cyan());
+        println!("{}", format!("Embedding {} code chunks...", chunks.len()).cyan());
 
         let contents: Vec<String> = chunks.iter()
             .map(|c| format!("File: {}\nLine: {}\n\n{}", c.path, c.start_line, c.content))
             .collect();
 
-        // Generate embeddings in batches
-        let embeddings = self.model.embed(contents.clone(), None).expect("Embedding failed");
+        let embeddings = match self.model.embed(contents.clone(), None) {
+            Ok(e) => e,
+            Err(e) => {
+                println!("{}", format!("Embedding failed: {}", e).red());
+                return;
+            }
+        };
 
-        // Update Index (Rewrite completely for MVP simplicity)
         self.index = chunks.into_iter().zip(embeddings.into_iter()).map(|(chunk, emb)| {
             IndexedDoc {
                 path: chunk.path,
@@ -99,21 +102,28 @@ impl SemanticIndexer {
             return "Index is empty. Run initialization.".to_string();
         }
 
-        let query_embedding = self.model.embed(vec![query.to_string()], None).unwrap().remove(0);
+        let query_embedding = match self.model.embed(vec![query.to_string()], None) {
+            Ok(res) => res[0].clone(),
+            Err(e) => return format!("Failed to embed query: {}", e),
+        };
 
         let mut scored_docs: Vec<(f32, &IndexedDoc)> = self.index.iter().map(|doc| {
             let score = cosine_similarity(&query_embedding, &doc.embedding);
             (score, doc)
         }).collect();
 
-        // Sort descending by score
-        scored_docs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        scored_docs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Format Result
-        scored_docs.iter().take(limit).map(|(score, doc)| {
+        let results: Vec<String> = scored_docs.iter().take(limit).map(|(score, doc)| {
             format!("--- Match (Score: {:.2}) ---\nFile: {}:{}\n\n{}\n", 
                 score, doc.path, doc.start_line, doc.content)
-        }).collect::<Vec<_>>().join("\n")
+        }).collect();
+
+        if results.is_empty() {
+            "No relevant code found.".to_string()
+        } else {
+            results.join("\n")
+        }
     }
 }
 
@@ -121,5 +131,5 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot_product: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot_product / (norm_a * norm_b)
+    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot_product / (norm_a * norm_b) }
 }

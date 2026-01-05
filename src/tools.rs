@@ -5,6 +5,19 @@ use crate::indexer::SemanticIndexer;
 
 pub fn get_tool_definitions() -> Vec<Value> {
     vec![
+        // --- Semantic Search (RAG) ---
+        json!({
+            "name": "semantic_search",
+            "description": "Search the codebase by meaning/intent. Use this when you don't know the file name or where logic is located. E.g., 'How is auth retried?', 'Where is the user struct defined?'",
+            "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
+        }),
+
+        json!({
+            "name": "rebuild_index",
+            "description": "Rebuild the semantic search index for the repository.",
+            "parameters": { "type": "object", "properties": {} }
+        }),
+
         // --- Analysis & File System ---
         json!({
             "name": "get_project_structure",
@@ -13,7 +26,7 @@ pub fn get_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "inspect_file_interface",
-            "description": "See code skeleton (classes/funcs) without reading the whole body.",
+            "description": "See code skeleton (classes/funcs) without reading the whole body. Good for understanding huge files.",
             "parameters": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
         }),
         json!({
@@ -92,18 +105,25 @@ pub fn get_tool_definitions() -> Vec<Value> {
             "description": "Reset current HEAD to a state.",
             "parameters": { "type": "object", "properties": { "target": { "type": "string" }, "hard": { "type": "boolean" } }, "required": ["target"] }
         }),
-        // -- RAG --
-        json!({
-            "name": "semantic_search",
-            "description": "Search the codebase by meaning. Use this when you don't know the exact file. E.g., 'How is auth retried?'",
-            "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
-        }),
     ]
 }
 
-pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEngine) -> String {
+pub fn dispatch(
+    name: &str, 
+    args: &Value, 
+    git: &GitEngine, 
+    analysis: &AnalysisEngine, 
+    indexer: &SemanticIndexer
+) -> String {
     match name {
-        // Analysis
+        // --- Semantic Search ---
+        "semantic_search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            // Pass limit 3 by default
+            indexer.search(query, 3) 
+        },
+
+        // --- Analysis & Files ---
         "get_project_structure" => {
             let depth = args["max_depth"].as_u64().unwrap_or(2) as usize;
             git.get_file_tree(depth)
@@ -122,7 +142,7 @@ pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEn
             git.write_file(path, content)
         },
 
-        // Git Basics
+        // --- Git Basics ---
         "git_status" => git.status(),
         "git_commit" => {
             let msg = args["message"].as_str().unwrap_or("update");
@@ -145,7 +165,7 @@ pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEn
             git.log(count)
         },
 
-        // Git Branching/Remote
+        // --- Git Advanced ---
         "git_checkout" => {
             let branch = args["branch"].as_str().unwrap_or("main");
             let create = args["create_new"].as_bool().unwrap_or(false);
@@ -166,8 +186,6 @@ pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEn
             let branch = args["branch"].as_str().unwrap_or("main");
             git.pull(remote, branch)
         },
-
-        // Git Safety
         "git_stash" => {
             let action = args["action"].as_str().unwrap_or("push");
             git.stash(action)
@@ -177,12 +195,6 @@ pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEn
             let hard = args["hard"].as_bool().unwrap_or(false);
             git.reset(target, hard)
         },
-                "semantic_search" => {
-            let query = args["query"].as_str().unwrap_or("");
-            indexer.search(query, 3) // Return top 3 results
-        },
-
-        _ => format!("Tool {} not found", name),
 
         _ => format!("Tool {} not found", name),
     }

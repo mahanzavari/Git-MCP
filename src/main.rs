@@ -61,7 +61,7 @@ async fn main() {
                                 let name = fc["name"].as_str().unwrap();
                                 let args = &fc["args"];
                                 
-                                println!("{} {}...", "⚙️ Executing".yellow(), name);
+                                println!("{} {}...", "Executing".yellow(), name);
                                 
                                 // Pass indexer reference
                                 let result = tools::dispatch(name, args, &git, &analysis, &indexer);

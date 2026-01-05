@@ -31,7 +31,7 @@ impl GitEngine {
         }
     }
 
-    fn run(&self, args: &[&str]) -> Result<String, String> {
+    pub fn run(&self, args: &[&str]) -> Result<String, String> {
         let output = Command::new("git")
             .args(args)
             .current_dir(&self.repo_path)
