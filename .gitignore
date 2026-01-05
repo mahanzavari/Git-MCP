@@ -24,3 +24,4 @@ coverage/
 *.rmeta
 *.d
 .git_agent_cache*/
+.fastembed_*/

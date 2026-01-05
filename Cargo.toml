@@ -26,6 +26,6 @@ tree-sitter-go = "0.20"
 tree-sitter-c = "0.20"
 
 # RAG / Indexing 
-fastembed = "3"       # Local embedding model
+fastembed = "4"       # Local embedding model
 rayon = "1.10"        # Parallel processing
 anyhow = "1.0"        # Error handling
