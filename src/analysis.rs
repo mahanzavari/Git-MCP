@@ -99,7 +99,11 @@ impl AnalysisEngine {
                 // Fallback: simple truncation for unsupported files
                 let lines: Vec<&str> = content.lines().collect();
                 if lines.len() > 50 {
-                    format!("{}\n... ({} lines hidden)", lines.into_iter().take(20).collect::<Vec<_>>().join("\n"), lines.len() - 20)
+                    format!(
+                        "{}\n... ({} lines hidden)",
+                        lines.iter().take(20).cloned().collect::<Vec<_>>().join("\n"),
+                        lines.len() - 20
+                    )
                 } else {
                     content.to_string()
                 }
