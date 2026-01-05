@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use crate::git::GitEngine;
 use crate::analysis::AnalysisEngine;
+use crate::indexer::SemanticIndexer;
 
 pub fn get_tool_definitions() -> Vec<Value> {
     vec![
@@ -91,6 +92,12 @@ pub fn get_tool_definitions() -> Vec<Value> {
             "description": "Reset current HEAD to a state.",
             "parameters": { "type": "object", "properties": { "target": { "type": "string" }, "hard": { "type": "boolean" } }, "required": ["target"] }
         }),
+        // -- RAG --
+        json!({
+            "name": "semantic_search",
+            "description": "Search the codebase by meaning. Use this when you don't know the exact file. E.g., 'How is auth retried?'",
+            "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
+        }),
     ]
 }
 
@@ -170,6 +177,12 @@ pub fn dispatch(name: &str, args: &Value, git: &GitEngine, analysis: &AnalysisEn
             let hard = args["hard"].as_bool().unwrap_or(false);
             git.reset(target, hard)
         },
+                "semantic_search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            indexer.search(query, 3) // Return top 3 results
+        },
+
+        _ => format!("Tool {} not found", name),
 
         _ => format!("Tool {} not found", name),
     }

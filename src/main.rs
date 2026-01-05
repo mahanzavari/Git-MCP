@@ -2,12 +2,13 @@ mod git;
 mod analysis;
 mod llm;
 mod tools;
+mod chunker; // New
+mod indexer; // New
 
 use dotenv::dotenv;
 use colored::*;
 use inquire::Text;
 use serde_json::{json, Value};
-// use std::env;
 
 #[tokio::main]
 async fn main() {
@@ -16,6 +17,12 @@ async fn main() {
     // 1. Initialize Engines
     let git = git::GitEngine::new().expect("Failed to init git");
     let analysis = analysis::AnalysisEngine::new(git.repo_path.clone());
+    
+    // Initialize RAG Indexer
+    // This will download the model (if new) and index the repo (on startup)
+    let mut indexer = indexer::SemanticIndexer::new(git.repo_path.clone());
+    indexer.index_repo(&git); 
+
     let client = llm::GeminiClient::new();
 
     println!("{}", format!("Git Agent (Rust) active in: {:?}", git.repo_path).green().bold());
@@ -30,33 +37,36 @@ async fn main() {
             Ok(input) => {
                 if input == "exit" { break; }
                 
-                // Add user message to history
+                // Re-index on specific command or occasionally (optional optimization)
+                if input == "reindex" {
+                    indexer.index_repo(&git);
+                    continue;
+                }
+
                 history.push(json!({ "role": "user", "parts": [{ "text": input }] }));
                 print!("{}", "Thinking... ".cyan());
 
-                // Loop for Tool execution (Agentic Loop)
                 loop {
+                    // Pass indexer to dispatch
                     let response = client.chat(&history, &tools::get_tool_definitions()).await;
                     
                     match response {
                         Ok(content) => {
-                            // Clean up loading spinner
                             print!("\r"); 
 
                             let parts = content["parts"].as_array().unwrap();
                             let first_part = &parts[0];
 
-                            // Case A: Model wants to call a tool
                             if let Some(fc) = first_part.get("functionCall") {
                                 let name = fc["name"].as_str().unwrap();
                                 let args = &fc["args"];
                                 
-                                // println!("{} {}...", "Executing".yellow(), name);
+                                println!("{} {}...", "⚙️ Executing".yellow(), name);
                                 
-                                let result = tools::dispatch(name, args, &git, &analysis);
+                                // Pass indexer reference
+                                let result = tools::dispatch(name, args, &git, &analysis, &indexer);
                                 
-                                // Feed result back to model
-                                history.push(content.clone()); // Add the model's call
+                                history.push(content.clone());
                                 history.push(json!({
                                     "role": "function",
                                     "parts": [{
@@ -66,11 +76,9 @@ async fn main() {
                                         }
                                     }]
                                 }));
-                                // Continue loop to let model interpret result
                                 continue; 
                             }
                             
-                            // Case B: Model returned text (Final Answer)
                             if let Some(text) = first_part.get("text") {
                                 println!("\n{}", text.as_str().unwrap());
                                 history.push(content.clone());
