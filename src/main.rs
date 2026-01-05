@@ -7,7 +7,7 @@ use dotenv::dotenv;
 use colored::*;
 use inquire::Text;
 use serde_json::{json, Value};
-use std::env;
+// use std::env;
 
 #[tokio::main]
 async fn main() {
@@ -18,7 +18,7 @@ async fn main() {
     let analysis = analysis::AnalysisEngine::new(git.repo_path.clone());
     let client = llm::GeminiClient::new();
 
-    println!("{}", format!("🤖 Git Agent (Rust) active in: {:?}", git.repo_path).green().bold());
+    println!("{}", format!("Git Agent (Rust) active in: {:?}", git.repo_path).green().bold());
 
     // 2. Chat History
     let mut history: Vec<Value> = Vec::new();
@@ -51,7 +51,7 @@ async fn main() {
                                 let name = fc["name"].as_str().unwrap();
                                 let args = &fc["args"];
                                 
-                                println!("{} {}...", "⚙️ Executing".yellow(), name);
+                                // println!("{} {}...", "Executing".yellow(), name);
                                 
                                 let result = tools::dispatch(name, args, &git, &analysis);
                                 
